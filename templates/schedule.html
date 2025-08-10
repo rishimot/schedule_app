@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>1日の予定表</title>
+  <style>
+    body { font-family: sans-serif; max-width: 600px; margin: 30px auto; padding: 20px; }
+    h1 { text-align: center; }
+    .date-nav { text-align: center; margin-bottom: 20px; }
+    .schedule-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+    .schedule-table th, .schedule-table td { border: 1px solid #aaa; padding: 8px; }
+    .schedule-table th { background-color: #f0f0f0; }
+    .save-button { display: block; margin: 20px auto; padding: 8px 16px; font-size: 16px; }
+    input.task-input { width: 100%; border: none; font-size: 16px; background: transparent; }
+    input.task-input:focus { background: #eef; outline: none; }
+  </style>
+</head>
+<body>
+
+  <h1>1日の予定表</h1>
+
+  <div class="date-nav">
+    <button onclick="changeDay(-1)">◀</button>
+    <span id="date-label"></span>
+    <button onclick="changeDay(1)">▶</button>
+  </div>
+
+  <table class="schedule-table">
+    <thead>
+      <tr><th>時刻</th><th>予定内容</th></tr>
+    </thead>
+    <tbody id="schedule-body">
+    </tbody>
+  </table>
+
+  <button class="save-button" onclick="saveSchedule()">（保存ボタン）</button>
+
+  <script>
+    const startHour = 6;
+    const endHour = 24;
+    let currentDate = new Date();
+
+    function pad(n) {
+      return n.toString().padStart(2, '0');
+    }
+
+    function formatDate(date) {
+      return date.toISOString().slice(0, 10);
+    }
+
+    function updateDateLabel() {
+      document.getElementById("date-label").textContent = `[ ${formatDate(currentDate)} ]`;
+    }
+
+    async function loadSchedule() {
+      const res = await fetch("/load?date=" + formatDate(currentDate));
+      const data = await res.json();
+
+      const tbody = document.getElementById("schedule-body");
+      tbody.innerHTML = "";
+
+      for (let h = startHour; h < endHour; h++) {
+        const timeLabel = `${pad(h)}:00 - ${pad(h + 1)}:00`;
+        const task = data[timeLabel] || "";
+
+        const tr = document.createElement("tr");
+
+        const tdTime = document.createElement("td");
+        tdTime.textContent = timeLabel;
+
+        const tdTask = document.createElement("td");
+        const input = document.createElement("input");
+        input.className = "task-input";
+        input.dataset.time = timeLabel;
+        input.value = task;
+
+        tdTask.appendChild(input);
+        tr.appendChild(tdTime);
+        tr.appendChild(tdTask);
+        tbody.appendChild(tr);
+      }
+    }
+
+    async function saveSchedule() {
+      const inputs = document.querySelectorAll(".task-input");
+      const data = {};
+      inputs.forEach(input => {
+        data[input.dataset.time] = input.value;
+      });
+
+      await fetch("/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          date: formatDate(currentDate),
+          schedule: data
+        })
+      });
+    }
+
+    function changeDay(offset) {
+      currentDate.setDate(currentDate.getDate() + offset);
+      updateDateLabel();
+      loadSchedule();
+    }
+
+    function updateCurrentTimeLine() {
+        const table = document.querySelector('.schedule-table tbody');
+        const line = document.getElementById('current-time-line');
+        const rows = Array.from(table.rows);
+        const now = new Date();
+        const currentMinutes = now.getHours() * 60 + now.getMinutes();
+
+        let found = false;
+        for (let i = 0; i < rows.length; i++) {
+            const timeText = rows[i].dataset.start;
+            const [h, m] = timeText.split(':').map(Number);
+            const rowMinutes = h * 60 + m;
+
+            if (currentMinutes < rowMinutes) {
+                const prevRow = rows[i - 1] || rows[i];
+                const rect = prevRow.getBoundingClientRect();
+                const offsetTop = prevRow.offsetTop + ((currentMinutes - (h * 60 + m)) / 60) * prevRow.offsetHeight;
+                line.style.top = `${offsetTop}px`;
+                found = true;
+                break;
+            }
+        }
+
+        if (!found && rows.length > 0) {
+            const lastRow = rows[rows.length - 1];
+            const rect = lastRow.getBoundingClientRect();
+            line.style.top = `${lastRow.offsetTop + lastRow.offsetHeight}px`;
+        }
+    }
+
+    updateDateLabel();
+    loadSchedule();
+
+    window.onload = updateCurrentTimeLine;
+    setInterval(updateCurrentTimeLine, 60000); 
+  </script>
+
+</body>
+</html>

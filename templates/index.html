@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>1日の予定表</title>
+    <style>
+        body { font-family: sans-serif; max-width: 600px; margin: 30px auto; padding: 20px; }
+        h1 { text-align: center; }
+        .date-nav { text-align: center; margin-bottom: 20px; }
+        .schedule-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+        .schedule-table th, .schedule-table td { border: 1px solid #aaa; padding: 8px; }
+        .schedule-table th { background-color: #f0f0f0; }
+        .save-button { display: block; margin: 20px auto; padding: 8px 16px; font-size: 16px; }
+        input.task-input { width: 100%; border: none; font-size: 16px; background: transparent; }
+        input.task-input:focus { background: #eef; outline: none; }
+        .update-form {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: white;
+            border: 2px solid #444;
+            padding: 20px;
+            z-index: 1000;
+            box-shadow: 0 0 10px rgba(0,0,0,0.5);
+        }
+
+        .remaining-time-container {
+            display: flex;
+            justify-content: center; /* 水平方向の中央揃え */
+            align-items: center;     /* 垂直方向の中央揃え（必要なら） */
+            text-align: center;      /* テキストの中央揃え */
+        }
+
+        .remaining-time-container ul {
+            list-style: none;        /* リストのポチ（・）を消す */
+            padding: 0;
+        }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+
+<div class="date-nav">
+    <button onclick="changeDay(-1)">◀</button>
+    <span id="date-label">{{ date }}</span>
+    <button onclick="changeDay(1)">▶</button>
+</div>
+
+{% if is_today %}
+<div class="remaining-time-container">
+    <p>※ あと、</p>
+    <ul>
+    {% for category, value in today_remaining_times.items() %}
+    <li>{{ category }}を<span style="color: red;">{{ value }}</span>分</li>
+    {% endfor %}
+    </ul>
+    <p>勉強する予定</p>
+</div>
+{% endif %}
+
+<canvas id="schedulePieChart" width="500" height="500"></canvas>
+
+<button onclick="openModal()">＋ 新しい予定を追加</button>
+<div id="add-form" style="display: none;">
+  <form method="POST" action="/add_schedule">
+    <label>開始時刻*:
+        <select name="start_hour" required>
+        {% for h in range(4, 24) %}
+        <option value="{{ "%02d" % h }}">{{ "%02d" % h }}</option>
+        {% endfor %}
+        {% for h in range(0, 4) %}
+        <option value="{{ "%02d" % h }}">{{ "%02d" % h }}</option>
+        {% endfor %}
+        </select>時
+        <select name="start_minute" required>
+        {% for m in range(0, 60, 5) %}
+        <option value="{{ "%02d" % m }}">{{ "%02d" % m }}</option>
+        {% endfor %}
+        </select>分
+    </label><br>
+
+    <label>終了時刻*:
+        <select name="end_hour" required>
+            {% for h in range(4, 24) %}
+            <option value="{{ "%02d" % h }}">{{ "%02d" % h }}</option>
+            {% endfor %}
+            {% for h in range(0, 4) %}
+            <option value="{{ "%02d" % h }}">{{ "%02d" % h }}</option>
+            {% endfor %}
+        </select>時
+        <select name="end_minute" required>
+            {% for m in range(0, 60, 5) %}
+            <option value="{{ "%02d" % m }}">{{ "%02d" % m }}</option>
+            {% endfor %}
+        </select>分
+    </label><br>
+
+    <label>予定*: <input type="text" name="topic" required></label><br>
+    <label>内容: <input type="text" name="content"></label><br>
+    <input type="hidden" name="date" value="{{ date }}">
+    <input type="hidden" name="id">
+    <button type="submit">保存</button>
+    <button onclick="closeModal()">キャンセル</button>
+  </form>
+</div>
+
+<div>
+    <form method="POST" action="/load_template">
+        <select id="template-list" name="template-name">
+            <option value="">テンプレートを選択</option>
+            {% for name in template_names %}
+            <option value="{{ name }}">{{ name }}</option>
+            {% endfor %}
+        </select>
+        <input type="hidden" name="date" value="{{ date }}">
+        <button type="submit">読み込む</button>
+    </form>
+</div>
+
+<button id="save-template-btn">テンプレートとして保存</button>
+<div id="template-modal" style="display: none;">
+    <form id="template-form">
+        <label>テンプレート名:</label>
+        <input type="text" name="template-name" placeholder="テンプレート名" required>
+        <input type="hidden" name="date" value="{{ date }}">
+        <button type="submit">保存</button>
+        <button onclick="closeTemplateModal()">キャンセル</button>
+    </form>
+</div>
+
+
+<table class="schedule-table">
+    <thead><tr><th>時刻</th><th>予定</th><th>内容</th><th>時間</th><th>編集</th><th>削除</th></tr></thead>
+    <tbody id="schedule-body">
+    {% for row in rows %}
+        <tr>
+            <td>{{ row.start_time }} - {{ row.end_time }}</td>
+            <td>{{ row.topic }}</td>
+            <td><input type="text" class="task-input" data-date="{{ date }}" data-id="{{ row.id }}" value="{{ row.content }}"></td>
+            <td>{{ row.duration }}min</td>
+            <td><button onclick='openEditModal({{ row | tojson }})'>編集</button></td>
+            <td><button onclick='deleteSchedule({{ row.id }})'>削除</button></td>
+        </tr>
+    {% endfor %}
+    </tbody>
+    <tfoot>
+        <tr> 
+            <td>合計</td>
+            <td colspan="5">
+            {% for category, plan_time in plan_times.items() %}
+                {{ category }}/<span style="font-weight: bold;">{{ plan_time }}</span>分
+                {% if not loop.last %},{% endif %}
+            {% endfor %}
+            </td>
+        </tr>
+    </tfoot>
+</table>
+
+<script>
+    const category = {{ category | safe }};
+    const schedules = {{ rows | safe }};
+    const today_hour = {{ TODAY_HOUR | safe }};
+
+    function parseTime(timeStr) {
+        const [hh, mm] = timeStr.split(':').map(Number);
+        return hh * 60 + mm;
+    }
+
+    async function drawSchedulePieChart() {
+        const now = new Date();
+        const totalMinutes = 24 * 60;
+
+        const ctx = document.getElementById('schedulePieChart').getContext('2d');
+
+        const data = new Array(24).fill(1);
+        const bgColors = new Array(24).fill('#f0f0f0');
+        const labelsPerHour = new Array(24).fill('');
+        const labels = [];
+        for (let i = 0; i < 24; i++) {
+            labels.push(i + ':00');
+        }
+
+        const clockChart = new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: labels,
+                datasets: [{
+                    data: data,
+                    backgroundColor: bgColors,
+                    borderWidth: 1,
+                    radius: '95%'
+                }]
+            },
+            options: {
+                responsive: false,
+                cutout: '0%',
+                rotation: -Math.PI / 2, 
+                plugins: {
+                    legend: {
+                        display: false
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                const hourIndex = context.dataIndex;
+                                return `${labels[hourIndex]}: ${labelsPerHour[hourIndex]}`;
+                            }
+                        }
+                    }
+                }
+            },
+            plugins: [{
+                id: 'clockLabelsAndHand',
+                afterDraw(chart) {
+                    const { ctx, chartArea, width, height } = chart;
+                    const centerX = chartArea.left + chartArea.width / 2;
+                    const centerY = chartArea.top + chartArea.height / 2;
+                    const radius = Math.min(chartArea.width, chartArea.height) / 2;
+
+                    ctx.fillStyle = '#000';
+                    ctx.font = '16px sans-serif';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+
+                    // 時計の時刻
+                    for (let h = 0; h < 24; h++) {
+                        const angle = (h / 24) * 2 * Math.PI - Math.PI / 2 - 0.02;
+                        const x = centerX + Math.cos(angle) * (radius - 10);
+                        const y = centerY + Math.sin(angle) * (radius - 10);
+                        ctx.fillText(h.toString(), x, y);
+                    }
+    
+                    ctx.globalAlpha = 0.7;
+                    schedules.forEach(schedule => {
+                        const start_time = parseTime(schedule.start_time);
+                        const end_time = parseTime(schedule.end_time);
+                        const duration = end_time - start_time;
+
+                        const adjustedRadius = radius * 0.95;
+                        const startAngle = (start_time / (24 * 60)) * 2 * Math.PI - Math.PI / 2 - 0.02;
+                        const endAngle = ((start_time + duration) / (24 * 60)) * 2 * Math.PI - Math.PI / 2 - 0.02;
+
+                        ctx.beginPath();
+                        ctx.moveTo(centerX, centerY);
+                        ctx.arc(centerX, centerY, adjustedRadius, startAngle, endAngle);
+                        ctx.closePath();
+
+                        const baseColor = schedule.color; 
+                        const alpha = category.includes(schedule.topic) ? 1.0 : 0.5;
+                        const rgbaColor = baseColor.replace('hsl', 'hsla').replace(')', `, ${alpha})`);
+                        ctx.fillStyle = rgbaColor 
+                        ctx.fill();
+
+                        const midAngle = (startAngle + endAngle) / 2;
+                        const labelX = centerX + Math.cos(midAngle) * (adjustedRadius * 0.7);
+                        const labelY = centerY + Math.sin(midAngle) * (adjustedRadius * 0.7);
+                        ctx.fillStyle = 'black';
+                        ctx.font = '12px sans-serif';
+                        ctx.fillText(schedule.topic, labelX, labelY);
+                    });
+
+                    {% if is_today %}
+                    const now = new Date(); 
+                    const hour = now.getHours() + now.getMinutes() / 60;
+                    const angle = (hour / 24) * 2 * Math.PI - Math.PI / 2 - 0.02;
+
+                    // 現在時刻まで黒塗り
+                    ctx.beginPath();
+                    const adjustedRadius = radius * 0.95;
+                    const startAngle = (today_hour * 60 / (24 * 60)) * 2 * Math.PI - Math.PI / 2 - 0.02;
+                    const endAngle = ((now.getHours() * 60 + now.getMinutes()) / (24 * 60)) * 2 * Math.PI - Math.PI / 2 - 0.02;
+                    ctx.moveTo(centerX, centerY);
+                    ctx.arc(centerX, centerY, adjustedRadius, startAngle, endAngle);
+                    ctx.closePath();
+                    ctx.fillStyle = "#000000";
+                    ctx.fill();
+
+                    // 現在時刻の針
+                    ctx.beginPath();
+                    ctx.moveTo(centerX, centerY);
+                    ctx.lineTo(centerX + Math.cos(angle) * (radius * 0.95), centerY + Math.sin(angle) * (radius * 0.95));
+                    ctx.strokeStyle = '#f00';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                    ctx.closePath();
+                    {% endif %}
+
+                    ctx.restore();
+                }
+            }]
+        });
+
+        /*
+        const canvas = document.getElementById('schedulePieChart')
+        canvas.addEventListener('click', (event) => {
+            const rect = canvas.getBoundingClientRect();
+            const clickX = event.clientX - rect.left;
+            const clickY = event.clientY - rect.top;
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
+            const dx = clickX - centerX;
+            const dy = clickY - centerY;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            const angle = Math.atan2(dy, dx); 
+
+            const normalizedAngle = angle < 0 ? angle + 2 * Math.PI : angle;
+
+            for (const wedge of wedges) {
+                if (
+                    distance >= wedge.innerRadius && distance <= wedge.outerRadius &&
+                    normalizedAngle >= wedge.startAngle && normalizedAngle < wedge.endAngle
+                ) {
+                    console.log("Clicked:", wedge.label);
+                }
+            }
+        });
+        */
+    }
+
+    function changeDay(offset) {
+        const current_date = "{{ date | safe }}";
+        const [year, month, day] = current_date.split("-").map(Number);
+        const date = new Date(year, month - 1, day);
+        date.setDate(date.getDate() + offset);
+        const y = date.getFullYear();
+        const m = String(date.getMonth() + 1).padStart(2, '0');
+        const d = String(date.getDate()).padStart(2, '0');
+        window.location.href = `/${y}-${m}-${d}`;
+    }
+
+    function openModal() {
+        const modal = document.getElementById('add-form');
+        modal.style.display = 'block';
+    }
+
+    function closeModal() {
+        const modal = document.getElementById('add-form');
+        modal.style.display = 'none';
+        modal.form.action = `/add_schedule`;
+    }
+
+    function openEditModal(schedule) {
+        const [start_hour, start_minute] = schedule.start_time.split(":");
+        const [end_hour, end_minute] = schedule.end_time.split(":");
+        const modal = document.getElementById('add-form');
+        modal.style.display = 'block';
+        modal.querySelector('form').action = `/update_schedule`;
+        modal.querySelector('select[name="start_hour"]').value = start_hour;
+        modal.querySelector('select[name="start_minute"]').value = start_minute;
+        modal.querySelector('select[name="end_hour"]').value = end_hour;
+        modal.querySelector('select[name="end_minute"]').value = end_minute;
+        modal.querySelector('input[name="topic"]').value = schedule.topic;
+        modal.querySelector('input[name="content"]').value = schedule.content;
+        modal.querySelector('input[name="date"]').value = schedule.date;
+        modal.querySelector('input[name="id"]').value = schedule.id;
+    }
+
+    function pad(n) {
+      return n.toString().padStart(2, '0');
+    }
+
+    async function deleteSchedule(id) {
+        try {
+            const response = await fetch(`/delete_schedule/${id}`, { method: 'DELETE' });
+
+            if (response.ok) {
+                console.log("削除成功");
+                window.location.reload();
+            } else {
+                console.error("削除に失敗しました", await response.text());
+            }
+        } catch (error) {
+            console.error("通信エラー", error);
+        }
+    }
+
+    document.getElementById("save-template-btn").onclick = () => {
+        document.getElementById("template-modal").style.display = "block";
+    };
+
+    function closeTemplateModal() {
+        document.getElementById("template-modal").style.display = "none";
+    }
+
+    document.querySelectorAll('.task-input').forEach(input => {
+        function saveContent() {
+            const content = input.value;
+            const schedule_id = input.dataset.id;
+            const date = input.dataset.date;
+
+            fetch('/update_content', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ content: content, id: schedule_id, date: date })
+            }).then(response => {
+                if (!response.ok) {
+                    console.error('保存失敗');
+                }
+            });
+        }
+
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && e.ctrlKey) {
+                saveContent();
+                input.blur(); 
+            }
+        });
+
+        input.addEventListener('blur', () => {
+            saveContent();
+        });
+    });
+
+    document.getElementById('template-form').addEventListener('submit', async function(event) {
+        event.preventDefault(); 
+
+        const form = event.target;
+        const formData = new FormData(form);
+        try {
+            const response = await fetch('/save_template', {
+                method: 'POST',
+                body: formData
+            });
+
+            const result = await response.json();
+            if (response.status == 200) {
+                alert("テンプレートを保存しました");
+            }
+        } catch (error) {
+            console.error(error);
+        }
+    });
+
+    window.addEventListener('DOMContentLoaded', () => {
+        drawSchedulePieChart();
+    });
+</script>
+</body>
+</html>
