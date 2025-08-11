@@ -102,7 +102,6 @@ def get_duration(date, start_time, end_time):
 def get_schedules(date):
     schedules = get_schedules_from_DB(date)
     remaining_times = get_remaining_times()
-    learning_times = get_learning_times()
     category = remaining_times.keys()
     is_today = (date == get_today().strftime(DATE_FORMAT))
     plan_times = { cate: 0 for cate in category }
@@ -120,11 +119,9 @@ def get_schedules(date):
                 start_time = schedule['start_time']
                 end_time = schedule['end_time']
                 
-                start_dt = datetime.datetime.strptime(f'{date} {start_time}', f'{DATE_FORMAT} {TIME_FORMAT}')
-                end_dt = datetime.datetime.strptime(f'{date} {end_time}', f'{DATE_FORMAT} {TIME_FORMAT}')
-                if end_dt < start_dt:
-                    next_date = (datetime.datetime.strptime(date, DATE_FORMAT) + datetime.timedelta(days=1)).strftime(DATE_FORMAT)
-                    end_dt =  datetime.datetime.strptime(f'{next_date} {end_time}', f'{DATE_FORMAT} {TIME_FORMAT}')
+                next_date = (datetime.datetime.strptime(date, DATE_FORMAT) + datetime.timedelta(days=1)).strftime(DATE_FORMAT)
+                start_dt =  datetime.datetime.strptime(f'{next_date} {start_time}' if "00:00" <= start_time <= "04:00" else f'{date} {start_time}', f'{DATE_FORMAT} {TIME_FORMAT}')
+                end_dt =  datetime.datetime.strptime(f'{next_date} {end_time}' if "00:00" <= end_time <= "04:00" else f'{date} {end_time}', f'{DATE_FORMAT} {TIME_FORMAT}')
                 duration = int((end_dt - max(start_dt, now)).total_seconds() // 60)
                 if duration > 0:
                     today_remaining_times[schedule["topic"]] -= int(duration * 0.8)
