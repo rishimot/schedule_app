@@ -139,7 +139,6 @@ def get_schedules(date):
                            is_today=is_today, 
                            template_names=template_names, 
                            today_remaining_times=today_remaining_times if is_today else None,
-                           today_learning_times=today_learning_times if is_today else None,
                            TODAY_HOUR=int(TODAY_HOUR))
 
 @app.route("/add_schedule", methods=["POST"])
