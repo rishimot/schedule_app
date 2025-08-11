@@ -20,6 +20,14 @@ class DateConverter(BaseConverter):
     regex = r'\d{4}-\d{2}-\d{2}'
 app.url_map.converters['date'] = DateConverter
 
+def get_learning_times():
+    response = requests.get("http://192.168.10.103:5003/api/get/learning_times")
+    if response.status_code == 200:
+        learning_time = response.json()
+    else:
+        learning_time = {}
+    return learning_time
+
 def get_remaining_times():
     response = requests.get("http://192.168.10.103:5003/api/get/remaining_times")
     if response.status_code == 200:
@@ -94,6 +102,7 @@ def get_duration(date, start_time, end_time):
 def get_schedules(date):
     schedules = get_schedules_from_DB(date)
     remaining_times = get_remaining_times()
+    learning_times = get_learning_times()
     category = remaining_times.keys()
     is_today = (date == get_today().strftime(DATE_FORMAT))
     plan_times = { cate: 0 for cate in category }
@@ -116,9 +125,10 @@ def get_schedules(date):
                 if end_dt < start_dt:
                     next_date = (datetime.datetime.strptime(date, DATE_FORMAT) + datetime.timedelta(days=1)).strftime(DATE_FORMAT)
                     end_dt =  datetime.datetime.strptime(f'{next_date} {end_time}', f'{DATE_FORMAT} {TIME_FORMAT}')
-                duration = int((end_dt - now).total_seconds() // 60)
+                duration = int((end_dt - max(start_dt, now)).total_seconds() // 60)
                 if duration > 0:
-                    today_remaining_times[schedule["topic"]] -= duration
+                    today_remaining_times[schedule["topic"]] -= int(duration * 0.8)
+
     template_names = [ f[:-5] for f in os.listdir("templates_data") if f.endswith(".json") ]
     return render_template('index.html', 
                            date=date, 
@@ -129,6 +139,7 @@ def get_schedules(date):
                            is_today=is_today, 
                            template_names=template_names, 
                            today_remaining_times=today_remaining_times if is_today else None,
+                           today_learning_times=today_learning_times if is_today else None,
                            TODAY_HOUR=int(TODAY_HOUR))
 
 @app.route("/add_schedule", methods=["POST"])
